@@ -3,14 +3,18 @@
 /// FIX: Returns early after cancellation (fixes Python UnboundLocalError bug).
 
 #include "primebds/handlers/chat.h"
+#include "primebds/commands/command_registry.h"
 #include "primebds/plugin.h"
 #include "primebds/utils/config/config_manager.h"
 #include "primebds/utils/logging.h"
 #include "primebds/utils/moderation.h"
 #include "primebds/utils/permissions/permission_manager.h"
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <regex>
+#include <string>
 
 namespace primebds::handlers {
 
@@ -31,6 +35,22 @@ namespace primebds::handlers {
     void handleChatEvent(PrimeBDS &plugin, endstone::PlayerChatEvent &event) {
         auto &player = event.getPlayer();
         auto xuid = player.getXuid();
+
+        const auto message = event.getMessage();
+        if (!event.isCancelled() && message.size() > 1 && message.front() == '!') {
+            const auto name_end = message.find_first_of(" \t\r\n", 1);
+            auto command_name = message.substr(1, name_end == std::string::npos
+                                                   ? std::string::npos : name_end - 1);
+            std::transform(command_name.begin(), command_name.end(), command_name.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
+
+            if (CommandRegistry::instance().find(command_name)) {
+                event.setCancelled(true);
+                const auto arguments = name_end == std::string::npos ? "" : message.substr(name_end);
+                (void)player.performCommand(command_name + arguments);
+                return;
+            }
+        }
 
         // Check mute status
         bool user_muted = plugin.db->checkAndUpdateMute(xuid, player.getName());
